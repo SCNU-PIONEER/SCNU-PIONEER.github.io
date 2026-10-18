@@ -123,9 +123,9 @@
     const at = (a) => `rgba(${red},${green},${blue},${a})`;
 
     const bloom = g.createRadialGradient(m, m, 0, m, m, m);
-    bloom.addColorStop(0, at(0.3));
-    bloom.addColorStop(0.4, at(0.16));
-    bloom.addColorStop(0.72, at(0.04));
+    bloom.addColorStop(0, at(0.42));
+    bloom.addColorStop(0.4, at(0.21));
+    bloom.addColorStop(0.72, at(0.05));
     bloom.addColorStop(1, at(0));
     g.fillStyle = bloom;
     g.fillRect(0, 0, s, s);
