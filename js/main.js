@@ -21,19 +21,20 @@
   if (!ctx) return;
 
   const CFG = {
-    maxSize: 700,     // longest edge of the emblem, css px
-    pitch: 7.2,       // wanted distance between dots on screen, css px
-    dot: 1.42,        // solid core radius, css px
-    halo: 2.15,       // glow radius as a multiple of the core
-    influence: 0.34,  // magnet radius as a fraction of the emblem size
-    pull: 2.0,        // magnet strength
-    swirl: 0.68,      // tangential share of the magnet
-    shell: 0.048,     // repel radius as a fraction of the emblem size
-    repel: 5.0,       // stops the swarm collapsing into one point
-    spring: 0.019,
-    damping: 0.9,
-    wander: 0.85,
-    maxSpeed: 30
+    maxSize: 700,      // emblem size cap, css px
+    pitch: 7.2,        // wanted distance between dots on screen, css px
+    dot: 1.42,         // solid core radius, css px
+    halo: 2.15,        // bloom radius as a multiple of the core
+    influence: 0.26,   // magnet reach, as a fraction of the emblem size
+    pull: 1.05,        // magnet strength
+    swirl: 0.38,       // tangential share of the magnet
+    shell: 0.042,      // repel ring radius, as a fraction of the emblem size
+    repel: 3.0,        // keeps the swarm from collapsing into one point
+    spring: 0.015,     // pull back towards the resting position
+    damping: 0.905,    // 1 = no friction
+    wander: 0,         // idle drift, css px — 0 keeps the page perfectly still
+    maxSpeed: 15,      // velocity cap, css px per frame
+    pixels: 4.2e6      // canvas budget, device px (keeps large screens fluid)
   };
 
   const TAU = Math.PI * 2;
@@ -109,6 +110,10 @@
   let size = 0;
   let midX = 0;
   let midY = 0;
+  let budget = CFG.pixels; // lowered when frames start running long
+  let coarse = 1; // 1, then 2: keep only every other dot
+
+  // One pre-rendered sprite per colour: a soft bloom with a solid core.
   let sprites = [];
   let dotSize = 0;
 
@@ -148,7 +153,8 @@
   function resize() {
     vw = window.innerWidth;
     vh = window.innerHeight;
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const want = Math.min(window.devicePixelRatio || 1, 2);
+    dpr = Math.max(1, Math.min(want, Math.sqrt(budget / Math.max(1, vw * vh))));
     canvas.width = Math.round(vw * dpr);
     canvas.height = Math.round(vh * dpr);
     canvas.style.width = vw + 'px';
@@ -158,7 +164,7 @@
     midX = vw / 2;
     midY = vh / 2;
 
-    const step = Math.max(1, Math.round((CFG.pitch * GRID) / size));
+    const step = Math.max(1, Math.round((CFG.pitch * coarse * GRID) / size));
     const rebuilt = step !== stride;
     if (rebuilt) selectCells(step);
 
@@ -179,6 +185,7 @@
     placed = true;
 
     buildSprites();
+    dirty = true;
     if (reduce) draw(performance.now(), 1);
   }
 
@@ -209,10 +216,26 @@
   let boot = 0;
   let running = false;
   let frameId = 0;
+  let stall = 0;
+  let excitement = 0; // highest charge[i] of the last frame
+  let dirty = true; // canvas needs one repaint even if nothing moves
+
+  function relief() {
+    if (budget > 2.4e6) budget *= 0.68;
+    else if (coarse === 1) coarse = 2;
+    else return;
+    stall = 0;
+    resize();
+  }
 
   function step(now) {
     const dt = Math.min(2.2, Math.max(0.25, (now - last) / 16.6667));
     last = now;
+
+    // If the screen cannot hold ~55 fps, thin the drawing out a little.
+    if (dt > 1.35) stall++;
+    else if (stall > 0) stall--;
+    if (stall > 90) relief();
 
     const ease = 1 - Math.pow(0.78, dt);
     pointer.x += (pointer.tx - pointer.x) * ease;
@@ -227,6 +250,9 @@
     const amp = CFG.wander;
     const maxV = CFG.maxSpeed;
     const boost = 1 + Math.max(0, 1 - (now - boot) / 1100) * 2.4;
+
+    excitement = 0;
+    let peak = 0;
 
     for (let i = 0; i < count; i++) {
       const x = posX[i];
@@ -259,10 +285,12 @@
         }
       }
       charge[i] += (hot - charge[i]) * 0.14;
+      if (charge[i] > excitement) excitement = charge[i];
 
       let vx = (velX[i] + ax * dt) * damp;
       let vy = (velY[i] + ay * dt) * damp;
       const speed = Math.sqrt(vx * vx + vy * vy);
+      if (speed > peak) peak = speed;
       if (speed > maxV) {
         vx = (vx / speed) * maxV;
         vy = (vy / speed) * maxV;
@@ -272,6 +300,7 @@
       posX[i] = x + vx * dt;
       posY[i] = y + vy * dt;
     }
+    return peak;
   }
 
   function draw(now, force) {
@@ -302,8 +331,13 @@
 
   function loop(now) {
     frameId = requestAnimationFrame(loop);
-    step(now);
-    draw(now, false);
+    const motion = step(now);
+    // A still swarm does not need repainting: that keeps the page at rest cheap
+    // and leaves the frame budget to the moment the pointer actually arrives.
+    if (dirty || motion > 0.02 || excitement > 0.01 || now - boot < 2600) {
+      dirty = false;
+      draw(now, false);
+    }
   }
 
   function start() {
@@ -320,6 +354,21 @@
   }
 
   /* ----------------------------------------------------------------- boot */
+  // Live tuning from the console:
+  //   SCNU_PIONEER.cfg                     current values
+  //   SCNU_PIONEER.apply({ pull: 1.6 })    change some, re-lay the emblem out
+  //   SCNU_PIONEER.stats()                 what is on screen right now
+  window.SCNU_PIONEER = {
+    cfg: CFG,
+    apply(patch) {
+      Object.assign(CFG, patch || {});
+      resize();
+    },
+    stats() {
+      return { dots: count, stride, coarse, dpr: +dpr.toFixed(2), size: Math.round(size) };
+    }
+  };
+
   resize();
   window.addEventListener('resize', resize, { passive: true });
   window.addEventListener('orientationchange', resize, { passive: true });

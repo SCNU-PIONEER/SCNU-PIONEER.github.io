@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render every static image asset straight from the particle data.
+"""Render the static image assets straight from the particle data.
 
-Keeps the little squares in the tab bar, the no-JS fallback and the social
-card identical in colour to the canvas on the page.
+Keeps the no-JS fallback and the social card identical in colour to the
+canvas on the page.  (The tab icon uses assets/logo.png as is.)
 
     python tools/make-icons.py
 """
@@ -18,7 +18,6 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "assets" / "particles.js"
 
-INK = (6, 7, 10)
 SS = 4  # supersampling factor
 
 
@@ -94,21 +93,9 @@ def tracked(draw, centre, y, text, font, fill, tracking):
         x += w + tracking
 
 
-def square(size, emblem):
-    tile = Image.new("RGBA", (size, size), INK + (255,))
-    tile.paste(emblem, (0, 0), emblem)
-    return tile
-
-
 def main():
     grid, cells = load()
     saved = []
-
-    for name, size, stride in (("icon-64.png", 64, 2), ("icon-180.png", 180, 1)):
-        square(size, render(grid, cells, size, stride=stride)).convert("RGB").save(
-            ROOT / "assets" / name, optimize=True
-        )
-        saved.append(name)
 
     emblem = render(grid, cells, 640)
     emblem.save(ROOT / "assets" / "emblem-640.png", optimize=True)
